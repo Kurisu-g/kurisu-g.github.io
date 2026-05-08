@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { initLeanCloud, AV } from '../utils/leancloud.js'
 
 const props = defineProps({
@@ -13,6 +13,80 @@ const author = ref('')
 const content = ref('')
 const submitting = ref(false)
 const submitError = ref('')
+const uploading = ref(false)
+const uploadMsg = ref('')
+const showEmoji = ref(false)
+const textareaRef = ref(null)
+
+const emojis = [
+  '😀','😂','🤣','😊','😍','🥰','😘','😜','😎','🤩',
+  '😢','😭','😡','🤬','👍','👎','🙏','💪','🎉','🔥',
+  '❤️','💔','✨','🌟','🐱','🐶','🌸','🍕','⚡','💯',
+  '🎂','🍰','☕','🎵','🏠','🚀','🌈','⭐','🤔','😅',
+  '🥺','🙈','🐵','🦊','🐼','🍉','🍦','🎮','💻','📚',
+  '👏','🤝','✌️','🤞','🍺','🎁','🌹','💐','🎄','😷'
+]
+
+function insertAtCursor(text) {
+  const ta = textareaRef.value
+  if (ta) {
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    content.value = content.value.substring(0, start) + text + content.value.substring(end)
+    setTimeout(() => {
+      ta.focus()
+      ta.setSelectionRange(start + text.length, start + text.length)
+    }, 50)
+  } else {
+    content.value += text
+  }
+}
+
+function insertEmoji(emoji) {
+  insertAtCursor(emoji)
+  showEmoji.value = false
+}
+
+function triggerUpload(type) {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = type === 'image' ? 'image/*' : 'video/*'
+  input.onchange = (e) => {
+    const file = e.target.files[0]
+    if (file) uploadFile(file, type)
+  }
+  input.click()
+}
+
+async function uploadFile(file, type) {
+  uploading.value = true
+  uploadMsg.value = '上传中...'
+  try {
+    const avFile = new AV.File(file.name, file)
+    await avFile.save()
+    const url = avFile.url()
+    uploadMsg.value = '上传成功！'
+    insertAtCursor(type === 'image' ? `![${file.name}](${url})` : `<video src="${url}" controls></video>`)
+    setTimeout(() => { uploadMsg.value = '' }, 2000)
+  } catch (e) {
+    console.error('Upload failed:', e)
+    uploadMsg.value = '上传失败'
+    setTimeout(() => { uploadMsg.value = '' }, 3000)
+  }
+  uploading.value = false
+}
+
+function renderContent(text) {
+  if (!text) return ''
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="comment-image" loading="lazy" onclick="window.open(this.src)" />')
+  html = html.replace(/<video src="([^"]+)" controls><\/video>/g, '<video src="$1" controls class="comment-video" preload="metadata"></video>')
+  html = html.replace(/\n/g, '<br>')
+  return html
+}
 
 onMounted(async () => {
   initLeanCloud()
@@ -103,7 +177,7 @@ function formatDate(date) {
           <strong class="comment-author">{{ c.author }}</strong>
           <span class="comment-time">{{ formatDate(c.createdAt) }}</span>
         </div>
-        <p class="comment-content">{{ c.content }}</p>
+        <div class="comment-content" v-html="renderContent(c.content)"></div>
       </div>
     </div>
 
@@ -117,12 +191,30 @@ function formatDate(date) {
         class="comment-input"
       />
       <textarea
+        ref="textareaRef"
         v-model="content"
-        placeholder="写下你的想法... *"
-        rows="4"
-        maxlength="1000"
+        placeholder="写下你的想法... 支持图片/视频和表情"
+        rows="5"
+        maxlength="2000"
         class="comment-textarea"
       ></textarea>
+      <div class="form-tools">
+        <div class="tool-buttons">
+          <button type="button" class="tool-btn" :disabled="uploading" @click="triggerUpload('image')" title="插入图片">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          </button>
+          <button type="button" class="tool-btn" :disabled="uploading" @click="triggerUpload('video')" title="插入视频">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </button>
+          <button type="button" class="tool-btn" @click="showEmoji = !showEmoji" title="表情">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+          </button>
+          <span v-if="uploadMsg" class="upload-msg">{{ uploadMsg }}</span>
+        </div>
+      </div>
+      <div v-if="showEmoji" class="emoji-picker">
+        <button v-for="e in emojis" :key="e" class="emoji-item" @click="insertEmoji(e)">{{ e }}</button>
+      </div>
       <div v-if="submitError" class="comment-submit-error">{{ submitError }}</div>
       <button
         class="comment-submit-btn"
@@ -172,12 +264,26 @@ function formatDate(date) {
   color: var(--vp-c-text-3);
 }
 .comment-content {
-  margin: 0;
   font-size: 0.95rem;
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--vp-c-text-2);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+.comment-content :deep(img.comment-image) {
+  display: block;
+  max-width: 100%;
+  max-height: 400px;
+  margin: 8px 0;
+  border-radius: 8px;
+  cursor: pointer;
+  object-fit: contain;
+}
+.comment-content :deep(video.comment-video) {
+  display: block;
+  max-width: 100%;
+  max-height: 400px;
+  margin: 8px 0;
+  border-radius: 8px;
 }
 .comment-form {
   margin-top: 32px;
@@ -191,7 +297,7 @@ function formatDate(date) {
   display: block;
   width: 100%;
   padding: 10px 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 6px;
   background: var(--vp-c-bg-soft);
@@ -208,6 +314,69 @@ function formatDate(date) {
 }
 .comment-textarea {
   resize: vertical;
+}
+.form-tools {
+  margin-bottom: 8px;
+}
+.tool-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tool-btn:hover:not(:disabled) {
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-brand-1);
+  border-color: var(--vp-c-divider);
+}
+.tool-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.upload-msg {
+  font-size: 0.8rem;
+  color: var(--vp-c-brand-1);
+  margin-left: 4px;
+}
+.emoji-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  max-height: 180px;
+  overflow-y: auto;
+}
+.emoji-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.emoji-item:hover {
+  background: var(--vp-c-divider);
 }
 .comment-submit-btn {
   padding: 8px 20px;

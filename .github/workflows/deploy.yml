@@ -1,40 +1,24 @@
-name: Deploy to GitHub Pages
+name: Deploy to Cloudflare Pages
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-      - name: Setup env
-        run: |
-          echo "VITE_LC_APP_ID=${{ secrets.LC_APP_ID }}" >> .env
-          echo "VITE_LC_APP_KEY=${{ secrets.LC_APP_KEY }}" >> .env
-          echo "VITE_LC_SERVER_URL=${{ secrets.LC_SERVER_URL }}" >> .env
       - run: npm ci
       - run: npm run build
-      - uses: actions/configure-pages@v4
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: .vitepress/dist
       - name: Deploy
-        uses: actions/deploy-pages@v4
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages deploy .vitepress/dist --project-name=kurisu-blog --branch=main
