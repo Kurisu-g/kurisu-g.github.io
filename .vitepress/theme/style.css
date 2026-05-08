@@ -1,0 +1,19 @@
+/* Custom theme styles */
+.vp-doc a {
+  text-decoration: none;
+}
+
+/* Post detail page */
+.post-detail-footer {
+  margin-top: 48px;
+}
+
+/* Responsive post list */
+@media (max-width: 640px) {
+  .post-card {
+    padding: 16px 0;
+  }
+  .post-title {
+    font-size: 1.1rem;
+  }
+}
