@@ -6,13 +6,12 @@ export function initLeanCloud() {
   if (initialized) return
 
   AV.init({
-    appId: 'eX3nDnSKjEEHFtyyCU7ut1um-gzGzoHsz',
-    appKey: 'vso9UDa0LlBvDEkh4NYjvCJL',
-    serverURLs: 'https://ex3ndnsk.lc-cn-n1-shared.com'
+    appId: import.meta.env.VITE_LC_APP_ID,
+    appKey: import.meta.env.VITE_LC_APP_KEY,
+    serverURLs: import.meta.env.VITE_LC_SERVER_URL
   })
 
   initialized = true
-  console.log('LeanCloud SDK 初始化成功')
 }
 
 export { AV }

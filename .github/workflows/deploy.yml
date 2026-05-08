@@ -25,6 +25,11 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - name: Setup env
+        run: |
+          echo "VITE_LC_APP_ID=${{ secrets.LC_APP_ID }}" >> .env
+          echo "VITE_LC_APP_KEY=${{ secrets.LC_APP_KEY }}" >> .env
+          echo "VITE_LC_SERVER_URL=${{ secrets.LC_SERVER_URL }}" >> .env
       - run: npm ci
       - run: npm run build
       - uses: actions/configure-pages@v4
