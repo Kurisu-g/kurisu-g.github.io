@@ -11,21 +11,20 @@ const loaded = ref(false)
 
 onMounted(async () => {
   initLeanCloud()
+  const storageKey = 'blog_viewed_' + props.postId
   try {
     const query = new AV.Query('PageView')
     query.equalTo('postId', props.postId)
     let obj = await query.first()
     if (obj) {
-      // 同一个 session 内不重复计数
-      const viewed = sessionStorage.getItem('blog_viewed_' + props.postId)
-      if (!viewed) {
+      if (!localStorage.getItem(storageKey)) {
         obj.increment('count', 1)
         const acl = new AV.ACL()
         acl.setPublicReadAccess(true)
         acl.setPublicWriteAccess(true)
         obj.setACL(acl)
         await obj.save(null, { fetchWhenSave: true })
-        sessionStorage.setItem('blog_viewed_' + props.postId, '1')
+        localStorage.setItem(storageKey, '1')
       }
       views.value = obj.get('count')
     } else {
@@ -38,7 +37,7 @@ onMounted(async () => {
       acl.setPublicWriteAccess(true)
       obj.setACL(acl)
       await obj.save()
-      sessionStorage.setItem('blog_viewed_' + props.postId, '1')
+      localStorage.setItem(storageKey, '1')
       views.value = 1
     }
   } catch (e) {

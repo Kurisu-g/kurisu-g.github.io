@@ -3,14 +3,18 @@ import { ref, onMounted } from 'vue'
 import { initLeanCloud, AV } from '../utils/leancloud.js'
 
 const props = defineProps({
-  limit: { type: Number, default: 0 }
+  posts: { type: Array, default: null },
+  limit: { type: Number, default: 0 },
 })
 
-const posts = ref([])
+const posts = ref(props.posts || [])
 const loading = ref(true)
 const error = ref('')
 
 onMounted(async () => {
+  const localPosts = props.posts ? [...props.posts] : []
+
+  // Fetch LeanCloud posts
   initLeanCloud()
   try {
     const query = new AV.Query('Post')
@@ -18,13 +22,24 @@ onMounted(async () => {
     query.descending('createdAt')
     if (props.limit > 0) query.limit(props.limit)
     const results = await query.find()
-    posts.value = results.map(obj => ({
+    const lcPosts = results.map(obj => ({
       id: obj.id,
       title: obj.get('title'),
       tags: obj.get('tags') || [],
       description: obj.get('description') || '',
-      createdAt: obj.createdAt,
+      date: obj.createdAt,
+      url: '/post?id=' + obj.id,
     }))
+
+    // Merge: LeanCloud posts + local .md posts, de-dupe by title, sort by date desc
+    const merged = [...lcPosts]
+    for (const lp of localPosts) {
+      if (!merged.some(m => m.title === lp.title)) {
+        merged.push(lp)
+      }
+    }
+    merged.sort((a, b) => new Date(b.date) - new Date(a.date))
+    posts.value = props.limit > 0 ? merged.slice(0, props.limit) : merged
   } catch (e) {
     console.error('Failed to load posts:', e)
     error.value = '加载文章失败'
@@ -45,18 +60,18 @@ function formatDate(dateStr) {
     <div v-else-if="error" class="pl-status pl-error">{{ error }}</div>
     <div v-else-if="posts.length === 0" class="pl-status">还没有文章，敬请期待！</div>
     <template v-else>
-      <article v-for="post in posts" :key="post.id" class="post-card">
+      <article v-for="post in posts" :key="post.slug || post.id" class="post-card">
         <h2 class="post-title">
-          <a :href="'/post?id=' + post.id">{{ post.title }}</a>
+          <a :href="post.url || '/posts/' + post.slug">{{ post.title }}</a>
         </h2>
         <div class="post-meta">
-          <time>{{ formatDate(post.createdAt) }}</time>
+          <time>{{ formatDate(post.date || post.createdAt) }}</time>
           <span class="tags" v-if="post.tags && post.tags.length">
             <span v-for="tag in post.tags" :key="tag" class="tag">{{ tag }}</span>
           </span>
         </div>
         <p v-if="post.description" class="post-excerpt">{{ post.description }}</p>
-        <a :href="'/post?id=' + post.id" class="read-more">阅读全文 →</a>
+        <a :href="post.url || '/posts/' + post.slug" class="read-more">阅读全文 →</a>
       </article>
     </template>
   </div>

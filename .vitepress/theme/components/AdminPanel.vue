@@ -2,24 +2,31 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { initLeanCloud, AV } from '../utils/leancloud.js'
 
-const PASSWORD_HASH = '53d6668b995a4117d05d7799f6563672f4659d05f9f9fd45f961164de256b5d0' // SHA-256 of 0709
+const PASSWORD_HASH = '53d6668b995a4117d05d7799f6563672f4659d05f9f9fd45f961164de256b5d0'
 
+// Auth
 let loggedIn = ref(false)
 let password = ref('')
 let loginError = ref('')
-let posts = ref([])
-let editingId = ref('')
+
+// Editor
 let title = ref('')
 let content = ref('')
 let tagsInput = ref('')
 let description = ref('')
+let editingId = ref('')
 let saving = ref(false)
-let uploading = ref(false)
-let uploadMsg = ref('')
 let message = ref('')
+
+// Posts list
+let posts = ref([])
 let loading = ref(true)
 let showDeleteConfirm = ref('')
-let textareaEl = ref(null)
+
+// Upload
+let dragOver = ref(false)
+let uploading = ref(false)
+let uploadStatus = ref('')
 
 async function sha256(str) {
   const buf = new TextEncoder().encode(str)
@@ -29,8 +36,7 @@ async function sha256(str) {
 
 async function doLogin() {
   loginError.value = ''
-  const h = await sha256(password.value)
-  if (h === PASSWORD_HASH) {
+  if (await sha256(password.value) === PASSWORD_HASH) {
     loggedIn.value = true
     sessionStorage.setItem('blog_admin', '1')
     loadPosts()
@@ -45,6 +51,8 @@ function doLogout() {
   sessionStorage.removeItem('blog_admin')
 }
 
+// --- Posts CRUD ---
+
 async function loadPosts() {
   loading.value = true
   try {
@@ -57,7 +65,6 @@ async function loadPosts() {
       content: obj.get('content'),
       tags: obj.get('tags') || [],
       description: obj.get('description') || '',
-      status: obj.get('status') || 'published',
       createdAt: obj.createdAt,
     }))
   } catch (e) {
@@ -130,50 +137,6 @@ async function savePost() {
   saving.value = false
 }
 
-function triggerUpload(type) {
-  const input = document.createElement('input')
-  input.type = 'file'
-  if (type === 'image') {
-    input.accept = 'image/jpeg,image/png,image/gif,image/webp,image/svg+xml'
-  } else {
-    input.accept = 'video/mp4,video/webm,video/ogg'
-  }
-  input.onchange = (e) => {
-    const file = e.target.files[0]
-    if (file) uploadFile(file, type)
-  }
-  input.click()
-}
-
-async function uploadFile(file, type) {
-  uploading.value = true
-  uploadMsg.value = '上传中...'
-  try {
-    const avFile = new AV.File(file.name, file)
-    await avFile.save()
-    const url = avFile.url()
-    uploadMsg.value = '上传成功！已插入'
-    insertAtCursor(type === 'image' ? `![${file.name}](${url})` : `<video src="${url}" controls></video>`)
-    setTimeout(() => { uploadMsg.value = '' }, 2000)
-  } catch (e) {
-    console.error('Upload failed:', e)
-    uploadMsg.value = '上传失败：' + (e.message || e.code || '未知错误')
-  }
-  uploading.value = false
-}
-
-function insertAtCursor(text) {
-  const ta = document.querySelector('.form-textarea')
-  if (!ta) { content.value += '\n' + text; return }
-  const start = ta.selectionStart
-  const end = ta.selectionEnd
-  content.value = content.value.substring(0, start) + text + content.value.substring(end)
-  setTimeout(() => {
-    ta.focus()
-    ta.setSelectionRange(start + text.length, start + text.length)
-  }, 50)
-}
-
 async function deletePost(id) {
   try {
     const obj = AV.Object.createWithoutData('Post', id)
@@ -183,18 +146,102 @@ async function deletePost(id) {
     message.value = '文章已删除'
   } catch (e) {
     console.error('Failed to delete post:', e)
-    message.value = '删除失败：' + (e.message || e.code || '未知错误')
+    message.value = '删除失败：' + (e.message || e.code || '')
   }
 }
 
-onMounted(async () => {
+// --- Drag & drop into textarea ---
+
+function onTextareaDragOver(e) {
+  e.preventDefault()
+  dragOver.value = true
+}
+
+function onTextareaDragLeave() {
+  dragOver.value = false
+}
+
+function calcCursorPos(textarea, clientX, clientY) {
+  const rect = textarea.getBoundingClientRect()
+  const style = window.getComputedStyle(textarea)
+  const lineH = parseInt(style.lineHeight) || parseInt(style.fontSize) * 1.4 || 18
+  const padTop = parseInt(style.paddingTop) || 12
+  const padLeft = parseInt(style.paddingLeft) || 12
+  const borderTop = parseInt(style.borderTopWidth) || 0
+  const borderLeft = parseInt(style.borderLeftWidth) || 0
+
+  const y = clientY - rect.top - padTop - borderTop
+  const x = clientX - rect.left - padLeft - borderLeft
+  const lineIdx = Math.max(0, Math.floor(y / lineH))
+
+  const lines = textarea.value.split('\n')
+  let offset = 0
+  for (let i = 0; i < lineIdx && i < lines.length; i++) {
+    offset += lines[i].length + 1
+  }
+  if (lineIdx < lines.length) {
+    const col = Math.max(0, Math.floor(x / 8)) // monospace ~8px per char
+    offset = Math.min(offset + col, offset + lines[lineIdx].length)
+  }
+  return Math.min(offset, textarea.value.length)
+}
+
+function insertAtCursor(text) {
+  const ta = document.querySelector('.editor-textarea')
+  if (!ta) { content.value += '\n' + text; return }
+  if (ta._pendingCursor != null) {
+    ta.selectionStart = ta._pendingCursor
+    ta.selectionEnd = ta._pendingCursor
+    ta._pendingCursor = null
+  }
+  const start = ta.selectionStart
+  const end = ta.selectionEnd
+  content.value = content.value.substring(0, start) + text + content.value.substring(end)
+  nextTick(() => {
+    ta.focus()
+    ta.setSelectionRange(start + text.length, start + text.length)
+  })
+}
+
+async function onTextareaDrop(e) {
+  e.preventDefault()
+  dragOver.value = false
+  const files = e.dataTransfer.files
+  if (!files.length) return
+
+  const ta = e.target
+  ta._pendingCursor = calcCursorPos(ta, e.clientX, e.clientY)
+
+  for (const file of files) {
+    await uploadAndInsert(file)
+  }
+}
+
+async function uploadAndInsert(file) {
+  uploading.value = true
+  uploadStatus.value = '上传中: ' + file.name + ' ...'
+  try {
+    const avFile = new AV.File(file.name, file)
+    await avFile.save()
+    const url = avFile.url()
+    const isVideo = file.type.startsWith('video/')
+    const md = isVideo
+      ? `<video src="${url}" controls></video>`
+      : `![${file.name}](${url})`
+    insertAtCursor('\n' + md + '\n')
+    uploadStatus.value = ''
+  } catch (e) {
+    console.error('Upload failed:', e)
+    uploadStatus.value = '上传失败: ' + (e.message || '未知错误')
+  }
+  uploading.value = false
+}
+
+onMounted(() => {
   initLeanCloud()
   if (sessionStorage.getItem('blog_admin') === '1') {
     loggedIn.value = true
-    await loadPosts()
-    loading.value = false
-  } else {
-    loading.value = false
+    loadPosts()
   }
 })
 </script>
@@ -205,11 +252,8 @@ onMounted(async () => {
     <div v-if="!loggedIn" class="login-box">
       <h2>管理登录</h2>
       <input
-        v-model="password"
-        type="password"
-        placeholder="请输入密码"
-        class="login-input"
-        @keyup.enter="doLogin"
+        v-model="password" type="password" placeholder="请输入密码"
+        class="login-input" @keyup.enter="doLogin"
       />
       <button class="login-btn" @click="doLogin">登录</button>
       <p v-if="loginError" class="login-error">{{ loginError }}</p>
@@ -222,7 +266,9 @@ onMounted(async () => {
         <button class="logout-btn" @click="doLogout">退出</button>
       </div>
 
+      <!-- Editor -->
       <h3>{{ editingId ? '编辑文章' : '写新文章' }}</h3>
+      <p class="hint">直接把桌面上的图片或视频拖到正文框里，自动上传并插入。</p>
 
       <div v-if="message" class="msg">{{ message }}</div>
 
@@ -232,7 +278,7 @@ onMounted(async () => {
       </div>
       <div class="form-group">
         <label>标签（逗号分隔）</label>
-        <input v-model="tagsInput" type="text" placeholder="如：JavaScript, 教程, 前端" class="form-input" />
+        <input v-model="tagsInput" type="text" placeholder="如：STM32, 嵌入式, 教程" class="form-input" />
       </div>
       <div class="form-group">
         <label>简介</label>
@@ -240,16 +286,15 @@ onMounted(async () => {
       </div>
       <div class="form-group">
         <label>正文（Markdown 格式）</label>
-        <div class="editor-toolbar">
-          <button class="upload-btn" :disabled="uploading" @click="triggerUpload('image')" title="上传图片">
-            🖼 插入图片
-          </button>
-          <button class="upload-btn" :disabled="uploading" @click="triggerUpload('video')" title="上传视频">
-            🎬 插入视频
-          </button>
-          <span v-if="uploadMsg" class="upload-msg">{{ uploadMsg }}</span>
-        </div>
-        <textarea ref="textareaEl" v-model="content" rows="16" placeholder="这里写文章内容，支持 Markdown 格式..." class="form-textarea"></textarea>
+        <div v-if="uploadStatus" class="upload-toast">{{ uploadStatus }}</div>
+        <textarea
+          v-model="content" rows="18" placeholder="这里写文章内容，支持 Markdown..."
+          class="editor-textarea"
+          :class="{ 'drag-active': dragOver }"
+          @dragover="onTextareaDragOver"
+          @dragleave="onTextareaDragLeave"
+          @drop="onTextareaDrop"
+        ></textarea>
       </div>
       <div class="form-actions">
         <button class="save-btn" :disabled="saving" @click="savePost">
@@ -260,6 +305,7 @@ onMounted(async () => {
 
       <hr />
 
+      <!-- Post list -->
       <h3>已发布文章（{{ posts.length }}）</h3>
       <div v-if="loading" class="loading-text">加载中...</div>
       <table v-else-if="posts.length > 0" class="post-table">
@@ -319,10 +365,7 @@ onMounted(async () => {
   font-family: inherit;
   box-sizing: border-box;
 }
-.login-input:focus {
-  outline: none;
-  border-color: var(--vp-c-brand-1);
-}
+.login-input:focus { outline: none; border-color: var(--vp-c-brand-1); }
 .login-btn {
   padding: 10px 40px;
   border: none;
@@ -332,18 +375,13 @@ onMounted(async () => {
   font-size: 1rem;
   cursor: pointer;
 }
-.login-btn:hover {
-  background: var(--vp-c-brand-2);
-}
-.login-error {
-  color: var(--vp-c-danger-1);
-  margin-top: 8px;
-}
+.login-btn:hover { background: var(--vp-c-brand-2); }
+.login-error { color: var(--vp-c-danger-1); margin-top: 8px; }
 .admin-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 .logout-btn {
   padding: 4px 14px;
@@ -354,6 +392,11 @@ onMounted(async () => {
   cursor: pointer;
   font-size: 0.85rem;
 }
+.hint {
+  color: var(--vp-c-text-3);
+  font-size: 0.85rem;
+  margin: 4px 0 12px;
+}
 .msg {
   padding: 8px 14px;
   margin-bottom: 12px;
@@ -362,9 +405,7 @@ onMounted(async () => {
   color: var(--vp-c-brand-1);
   font-size: 0.9rem;
 }
-.form-group {
-  margin-bottom: 14px;
-}
+.form-group { margin-bottom: 14px; }
 .form-group label {
   display: block;
   margin-bottom: 4px;
@@ -372,8 +413,7 @@ onMounted(async () => {
   font-weight: 500;
   color: var(--vp-c-text-1);
 }
-.form-input,
-.form-textarea {
+.form-input {
   display: block;
   width: 100%;
   padding: 9px 12px;
@@ -385,17 +425,38 @@ onMounted(async () => {
   font-family: inherit;
   box-sizing: border-box;
 }
-.form-input:focus,
-.form-textarea:focus {
-  outline: none;
-  border-color: var(--vp-c-brand-1);
-}
-.form-textarea {
-  resize: vertical;
-  line-height: 1.6;
-  font-family: 'JetBrains Mono', monospace;
+.form-input:focus { outline: none; border-color: var(--vp-c-brand-1); }
+
+.editor-textarea {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
   font-size: 0.85rem;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  line-height: 1.7;
+  box-sizing: border-box;
+  resize: vertical;
+  transition: border-color 0.2s;
 }
+.editor-textarea:focus { outline: none; border-color: var(--vp-c-brand-1); }
+.editor-textarea.drag-active {
+  border-color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+}
+
+.upload-toast {
+  padding: 6px 12px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: var(--vp-c-brand-1);
+  color: #fff;
+  font-size: 0.8rem;
+}
+
 .form-actions {
   display: flex;
   gap: 10px;
@@ -409,14 +470,10 @@ onMounted(async () => {
   color: #fff;
   cursor: pointer;
   font-size: 0.95rem;
+  font-family: inherit;
 }
-.save-btn:hover:not(:disabled) {
-  background: var(--vp-c-brand-2);
-}
-.save-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+.save-btn:hover:not(:disabled) { background: var(--vp-c-brand-2); }
+.save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .cancel-btn {
   padding: 8px 16px;
   border: 1px solid var(--vp-c-divider);
@@ -425,12 +482,15 @@ onMounted(async () => {
   color: var(--vp-c-text-2);
   cursor: pointer;
   font-size: 0.9rem;
+  font-family: inherit;
 }
+
 hr {
   margin: 28px 0;
   border: none;
   border-top: 1px solid var(--vp-c-divider);
 }
+
 .post-table {
   width: 100%;
   border-collapse: collapse;
@@ -447,54 +507,35 @@ hr {
   padding: 10px;
   border-bottom: 1px solid var(--vp-c-divider);
 }
-.td-title {
-  font-weight: 500;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.td-tags {
-  max-width: 150px;
-}
+.td-title { font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-tags { max-width: 150px; }
 .tag-sm {
   display: inline-block;
-  padding: 0 6px;
-  margin: 1px;
+  padding: 0 6px; margin: 1px;
   border-radius: 10px;
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand-1);
   font-size: 0.75rem;
 }
 .edit-btn, .del-btn {
-  padding: 3px 10px;
-  margin-right: 4px;
+  padding: 3px 10px; margin-right: 4px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 4px;
   background: transparent;
   cursor: pointer;
   font-size: 0.8rem;
+  font-family: inherit;
 }
 .edit-btn { color: var(--vp-c-brand-1); }
 .del-btn { color: var(--vp-c-danger-1); }
-.delete-confirm {
-  font-size: 0.8rem;
-  margin-left: 4px;
-  white-space: nowrap;
-}
+.delete-confirm { font-size: 0.8rem; margin-left: 4px; white-space: nowrap; }
 .del-yes, .del-no {
-  padding: 1px 6px;
-  margin-left: 2px;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 0.75rem;
+  padding: 1px 6px; margin-left: 2px;
+  border: none; border-radius: 3px;
+  cursor: pointer; font-size: 0.75rem;
+  font-family: inherit;
 }
 .del-yes { background: var(--vp-c-danger-1); color: #fff; }
 .del-no { background: var(--vp-c-divider); color: var(--vp-c-text-2); }
-.loading-text, .no-posts {
-  text-align: center;
-  padding: 30px 0;
-  color: var(--vp-c-text-2);
-}
+.loading-text, .no-posts { text-align: center; padding: 30px 0; color: var(--vp-c-text-2); }
 </style>

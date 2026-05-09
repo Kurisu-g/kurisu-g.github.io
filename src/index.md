@@ -14,6 +14,10 @@ hero:
       link: /about
 ---
 
+<script setup>
+import { data } from './posts.data.js'
+</script>
+
 ## 最新文章
 
-<PostList limit="5" />
+<PostList :posts="data.slice(0, 5)" />
