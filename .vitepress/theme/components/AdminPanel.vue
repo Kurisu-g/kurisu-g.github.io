@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { initLeanCloud, AV } from '../utils/leancloud.js'
+import { calcCursorPos, handleFiles } from '../utils/upload.js'
 
 const PASSWORD_HASH = '53d6668b995a4117d05d7799f6563672f4659d05f9f9fd45f961164de256b5d0'
 
@@ -161,29 +162,29 @@ function onTextareaDragLeave() {
   dragOver.value = false
 }
 
-function calcCursorPos(textarea, clientX, clientY) {
-  const rect = textarea.getBoundingClientRect()
-  const style = window.getComputedStyle(textarea)
-  const lineH = parseInt(style.lineHeight) || parseInt(style.fontSize) * 1.4 || 18
-  const padTop = parseInt(style.paddingTop) || 12
-  const padLeft = parseInt(style.paddingLeft) || 12
-  const borderTop = parseInt(style.borderTopWidth) || 0
-  const borderLeft = parseInt(style.borderLeftWidth) || 0
+function onTextareaDrop(e) {
+  e.preventDefault()
+  dragOver.value = false
+  const files = e.dataTransfer.files
+  if (!files.length) return
+  const ta = e.target
+  ta._pendingCursor = calcCursorPos(ta, e.clientX, e.clientY)
+  uploadFiles(files)
+}
 
-  const y = clientY - rect.top - padTop - borderTop
-  const x = clientX - rect.left - padLeft - borderLeft
-  const lineIdx = Math.max(0, Math.floor(y / lineH))
-
-  const lines = textarea.value.split('\n')
-  let offset = 0
-  for (let i = 0; i < lineIdx && i < lines.length; i++) {
-    offset += lines[i].length + 1
+function onTextareaPaste(e) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const files = []
+  for (const item of items) {
+    if (item.kind === 'file') files.push(item.getAsFile())
   }
-  if (lineIdx < lines.length) {
-    const col = Math.max(0, Math.floor(x / 8)) // monospace ~8px per char
-    offset = Math.min(offset + col, offset + lines[lineIdx].length)
+  if (files.length) {
+    e.preventDefault()
+    const ta = e.target
+    ta._pendingCursor = ta.selectionStart
+    uploadFiles(files)
   }
-  return Math.min(offset, textarea.value.length)
 }
 
 function insertAtCursor(text) {
@@ -203,37 +204,20 @@ function insertAtCursor(text) {
   })
 }
 
-async function onTextareaDrop(e) {
-  e.preventDefault()
-  dragOver.value = false
-  const files = e.dataTransfer.files
-  if (!files.length) return
-
-  const ta = e.target
-  ta._pendingCursor = calcCursorPos(ta, e.clientX, e.clientY)
-
-  for (const file of files) {
-    await uploadAndInsert(file)
-  }
-}
-
-async function uploadAndInsert(file) {
+function uploadFiles(files) {
   uploading.value = true
-  uploadStatus.value = '上传中: ' + file.name + ' ...'
-  try {
-    const avFile = new AV.File(file.name, file)
-    await avFile.save()
-    const url = avFile.url()
-    const isVideo = file.type.startsWith('video/')
-    const md = isVideo
-      ? `<video src="${url}" controls></video>`
-      : `![${file.name}](${url})`
-    insertAtCursor('\n' + md + '\n')
-    uploadStatus.value = ''
-  } catch (e) {
-    console.error('Upload failed:', e)
-    uploadStatus.value = '上传失败: ' + (e.message || '未知错误')
-  }
+  handleFiles(files, {
+    onStart(file) {
+      uploadStatus.value = '上传中: ' + file.name + ' ...'
+    },
+    onDone(file, md) {
+      insertAtCursor('\n' + md + '\n')
+      uploadStatus.value = ''
+    },
+    onError(file, msg) {
+      uploadStatus.value = '上传失败: ' + msg
+    },
+  })
   uploading.value = false
 }
 
@@ -294,6 +278,7 @@ onMounted(() => {
           @dragover="onTextareaDragOver"
           @dragleave="onTextareaDragLeave"
           @drop="onTextareaDrop"
+          @paste="onTextareaPaste"
         ></textarea>
       </div>
       <div class="form-actions">

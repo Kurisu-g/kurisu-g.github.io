@@ -1,6 +1,7 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { initLeanCloud, AV } from '../utils/leancloud.js'
+import { calcCursorPos, handleFiles } from '../utils/upload.js'
 
 const props = defineProps({
   postId: { type: String, required: true }
@@ -17,6 +18,7 @@ const uploading = ref(false)
 const uploadMsg = ref('')
 const showEmoji = ref(false)
 const textareaRef = ref(null)
+const dragOver = ref(false)
 
 const emojis = [
   '😀','😂','🤣','😊','😍','🥰','😘','😜','😎','🤩',
@@ -29,17 +31,19 @@ const emojis = [
 
 function insertAtCursor(text) {
   const ta = textareaRef.value
-  if (ta) {
-    const start = ta.selectionStart
-    const end = ta.selectionEnd
-    content.value = content.value.substring(0, start) + text + content.value.substring(end)
-    setTimeout(() => {
-      ta.focus()
-      ta.setSelectionRange(start + text.length, start + text.length)
-    }, 50)
-  } else {
-    content.value += text
+  if (!ta) { content.value += text; return }
+  if (ta._pendingCursor != null) {
+    ta.selectionStart = ta._pendingCursor
+    ta.selectionEnd = ta._pendingCursor
+    ta._pendingCursor = null
   }
+  const start = ta.selectionStart
+  const end = ta.selectionEnd
+  content.value = content.value.substring(0, start) + text + content.value.substring(end)
+  nextTick(() => {
+    ta.focus()
+    ta.setSelectionRange(start + text.length, start + text.length)
+  })
 }
 
 function insertEmoji(emoji) {
@@ -53,27 +57,66 @@ function triggerUpload(type) {
   input.accept = type === 'image' ? 'image/*' : 'video/*'
   input.onchange = (e) => {
     const file = e.target.files[0]
-    if (file) uploadFile(file, type)
+    if (file) uploadFiles([file])
   }
   input.click()
 }
 
-async function uploadFile(file, type) {
+function uploadFiles(files) {
+  const ta = textareaRef.value
+  if (ta) ta._pendingCursor = ta.selectionStart
   uploading.value = true
   uploadMsg.value = '上传中...'
-  try {
-    const avFile = new AV.File(file.name, file)
-    await avFile.save()
-    const url = avFile.url()
-    uploadMsg.value = '上传成功！'
-    insertAtCursor(type === 'image' ? `![${file.name}](${url})` : `<video src="${url}" controls></video>`)
-    setTimeout(() => { uploadMsg.value = '' }, 2000)
-  } catch (e) {
-    console.error('Upload failed:', e)
-    uploadMsg.value = '上传失败'
-    setTimeout(() => { uploadMsg.value = '' }, 3000)
-  }
+  handleFiles(files, {
+    onStart() {},
+    onDone(file, md) {
+      insertAtCursor('\n' + md + '\n')
+      uploadMsg.value = ''
+    },
+    onError(file, msg) {
+      uploadMsg.value = msg
+      setTimeout(() => { uploadMsg.value = '' }, 3000)
+    },
+  })
   uploading.value = false
+}
+
+// --- Drag & drop ---
+
+function onDragOver(e) {
+  e.preventDefault()
+  dragOver.value = true
+}
+
+function onDragLeave() {
+  dragOver.value = false
+}
+
+function onDrop(e) {
+  e.preventDefault()
+  dragOver.value = false
+  const files = e.dataTransfer.files
+  if (!files.length) return
+  const ta = e.target
+  ta._pendingCursor = calcCursorPos(ta, e.clientX, e.clientY)
+  uploadFiles(files)
+}
+
+// --- Ctrl+V paste images ---
+
+function onPaste(e) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const files = []
+  for (const item of items) {
+    if (item.kind === 'file') files.push(item.getAsFile())
+  }
+  if (files.length) {
+    e.preventDefault()
+    const ta = e.target
+    ta._pendingCursor = ta.selectionStart
+    uploadFiles(files)
+  }
 }
 
 function renderContent(text) {
@@ -197,6 +240,11 @@ function formatDate(date) {
         rows="5"
         maxlength="2000"
         class="comment-textarea"
+        :class="{ 'drag-active': dragOver }"
+        @dragover="onDragOver"
+        @dragleave="onDragLeave"
+        @drop="onDrop"
+        @paste="onPaste"
       ></textarea>
       <div class="form-tools">
         <div class="tool-buttons">
@@ -311,6 +359,10 @@ function formatDate(date) {
 .comment-textarea:focus {
   outline: none;
   border-color: var(--vp-c-brand-1);
+}
+.comment-textarea.drag-active {
+  border-color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
 }
 .comment-textarea {
   resize: vertical;
