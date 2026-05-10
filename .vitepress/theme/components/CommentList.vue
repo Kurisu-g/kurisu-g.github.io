@@ -19,6 +19,28 @@ const uploadMsg = ref('')
 const showEmoji = ref(false)
 const textareaRef = ref(null)
 const dragOver = ref(false)
+const lightboxSrc = ref('')
+const lightboxType = ref('')
+const showLightbox = ref(false)
+
+function openLightbox(src, type) {
+  lightboxSrc.value = src
+  lightboxType.value = type
+  showLightbox.value = true
+  document.body.style.overflow = 'hidden'
+}
+
+function closeLightbox() {
+  showLightbox.value = false
+  document.body.style.overflow = ''
+}
+
+function onCommentClick(e) {
+  const img = e.target.closest('.comment-image')
+  if (img) { openLightbox(img.src, 'image'); return }
+  const video = e.target.closest('.comment-video')
+  if (video) { openLightbox(video.querySelector('source')?.src || video.src, 'video'); return }
+}
 
 const emojis = [
   '😀','😂','🤣','😊','😍','🥰','😘','😜','😎','🤩',
@@ -125,8 +147,8 @@ function renderContent(text) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="comment-image" loading="lazy" onclick="window.open(this.src)" />')
-  html = html.replace(/<video src="([^"]+)" controls><\/video>/g, '<video src="$1" controls class="comment-video" preload="metadata"></video>')
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="comment-image" loading="lazy" />')
+  html = html.replace(/<video src="([^"]+)" controls><\/video>/g, '<video controls class="comment-video" preload="metadata"><source src="$1"></video>')
   html = html.replace(/\n/g, '<br>')
   return html
 }
@@ -220,7 +242,7 @@ function formatDate(date) {
           <strong class="comment-author">{{ c.author }}</strong>
           <span class="comment-time">{{ formatDate(c.createdAt) }}</span>
         </div>
-        <div class="comment-content" v-html="renderContent(c.content)"></div>
+        <div class="comment-content" v-html="renderContent(c.content)" @click="onCommentClick"></div>
       </div>
     </div>
 
@@ -272,6 +294,13 @@ function formatDate(date) {
         {{ submitting ? '提交中...' : '发表评论' }}
       </button>
     </div>
+
+    <Teleport to="body">
+      <div v-if="showLightbox" class="lightbox-overlay" @click="closeLightbox">
+        <img v-if="lightboxType === 'image'" :src="lightboxSrc" class="lightbox-img" @click.stop />
+        <video v-else-if="lightboxType === 'video'" :src="lightboxSrc" controls class="lightbox-video" @click.stop></video>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -323,7 +352,7 @@ function formatDate(date) {
   max-height: 400px;
   margin: 8px 0;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: zoom-in;
   object-fit: contain;
 }
 .comment-content :deep(video.comment-video) {
@@ -331,6 +360,24 @@ function formatDate(date) {
   max-width: 100%;
   max-height: 400px;
   margin: 8px 0;
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.lightbox-video {
+  max-width: 90vw;
+  max-height: 90vh;
   border-radius: 8px;
 }
 .comment-form {
