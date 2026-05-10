@@ -8,6 +8,25 @@ import ViewCounter from './ViewCounter.vue'
 const post = ref(null)
 const loading = ref(true)
 const error = ref('')
+const lightboxSrc = ref('')
+const showLightbox = ref(false)
+
+function openLightbox(src) {
+  lightboxSrc.value = src
+  showLightbox.value = true
+  document.body.style.overflow = 'hidden'
+}
+
+function closeLightbox() {
+  showLightbox.value = false
+  document.body.style.overflow = ''
+}
+
+function onContentClick(e) {
+  if (e.target.tagName === 'IMG') {
+    openLightbox(e.target.src)
+  }
+}
 
 onMounted(async () => {
   initLeanCloud()
@@ -135,7 +154,7 @@ function esc(s) {
           <span v-for="tag in post.tags" :key="tag" class="pd-tag">{{ tag }}</span>
         </span>
       </div>
-      <div class="pd-content" v-html="renderMd(post.content)"></div>
+      <div class="pd-content" v-html="renderMd(post.content)" @click="onContentClick"></div>
 
       <div class="pd-footer">
         <ViewCounter :postId="post.id" />
@@ -145,6 +164,12 @@ function esc(s) {
         <CommentList :postId="post.id" />
       </div>
     </template>
+
+    <Teleport to="body">
+      <div v-if="showLightbox" class="lightbox-overlay" @click="closeLightbox">
+        <img :src="lightboxSrc" class="lightbox-img" @click.stop />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -199,7 +224,19 @@ function esc(s) {
 .pd-content :deep(blockquote) { margin: 12px 0; padding: 8px 16px; border-left: 3px solid var(--vp-c-brand-1); background: var(--vp-c-bg-soft); }
 .pd-content :deep(li) { margin: 4px 0; }
 .pd-content :deep(a) { color: var(--vp-c-brand-1); }
-.pd-content :deep(img) { max-width: 100%; border-radius: 8px; margin: 12px 0; }
+.pd-content :deep(img) { max-width: 100%; border-radius: 8px; margin: 12px 0; cursor: zoom-in; }
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
 .pd-content :deep(video) { max-width: 100%; border-radius: 8px; margin: 12px 0; }
 .pd-content :deep(iframe) { max-width: 100%; border-radius: 8px; margin: 12px 0; }
 .pd-footer {
