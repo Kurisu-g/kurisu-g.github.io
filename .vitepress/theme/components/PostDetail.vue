@@ -9,10 +9,12 @@ const post = ref(null)
 const loading = ref(true)
 const error = ref('')
 const lightboxSrc = ref('')
+const lightboxType = ref('')
 const showLightbox = ref(false)
 
-function openLightbox(src) {
+function openLightbox(src, type) {
   lightboxSrc.value = src
+  lightboxType.value = type
   showLightbox.value = true
   document.body.style.overflow = 'hidden'
 }
@@ -24,7 +26,10 @@ function closeLightbox() {
 
 function onContentClick(e) {
   if (e.target.tagName === 'IMG') {
-    openLightbox(e.target.src)
+    openLightbox(e.target.src, 'image')
+  } else if (e.target.tagName === 'VIDEO') {
+    openLightbox(e.target.querySelector('source')?.src || e.target.src, 'video')
+    e.target.pause()
   }
 }
 
@@ -167,7 +172,8 @@ function esc(s) {
 
     <Teleport to="body">
       <div v-if="showLightbox" class="lightbox-overlay" @click="closeLightbox">
-        <img :src="lightboxSrc" class="lightbox-img" @click.stop />
+        <img v-if="lightboxType === 'image'" :src="lightboxSrc" class="lightbox-img" @click.stop />
+        <video v-else-if="lightboxType === 'video'" :src="lightboxSrc" controls class="lightbox-video" @click.stop></video>
       </div>
     </Teleport>
   </div>
@@ -237,7 +243,12 @@ function esc(s) {
   object-fit: contain;
   border-radius: 8px;
 }
-.pd-content :deep(video) { max-width: 100%; border-radius: 8px; margin: 12px 0; }
+.lightbox-video {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+}
+.pd-content :deep(video) { max-width: 100%; border-radius: 8px; margin: 12px 0; cursor: zoom-in; }
 .pd-content :deep(iframe) { max-width: 100%; border-radius: 8px; margin: 12px 0; }
 .pd-footer {
   margin-top: 48px;
