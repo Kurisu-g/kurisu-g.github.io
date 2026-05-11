@@ -21,4 +21,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy .vitepress/dist --project-name=kurisu-blog --branch=main
+          command: pages deploy .vitepress/dist --project-name=kurisu-blog --branch=main --functions=./functions

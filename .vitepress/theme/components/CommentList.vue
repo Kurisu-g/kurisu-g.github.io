@@ -2,10 +2,38 @@
 import { ref, onMounted, nextTick, computed } from 'vue'
 import { initLeanCloud, AV } from '../utils/leancloud.js'
 import { calcCursorPos, handleFiles } from '../utils/upload.js'
+import { isAdmin, checkAdmin } from '../utils/state.js'
 
 const props = defineProps({
   postId: { type: String, required: true }
 })
+
+const BLOCKED_WORDS = [
+  '约炮','约p','yue炮','yp','一夜情','一夜qing','裸聊','luo聊',
+  '性交','做爱','操你','草你','cao你','fuck','FUCK','Fuck',
+  '妓女','嫖娼','嫖','鸡婆','卖淫','买春','援交',
+  '赌博','博彩','赌场','六合彩','彩票网','下注',
+  '代孕','dai孕','daiyun',
+  '毒品','吸毒','海洛因','冰毒','大麻','摇头丸',
+  '枪支','手枪','步枪','买枪',
+  '高利贷','贷款中介','办证','假证','刻章',
+  '色情','黄色','a片','A片','毛片','av','AV',
+  'SM','sm','sM','Sm',
+  '偷拍','走光','露点',
+  '招嫖','上门服务','特殊服务',
+  '网赌','赌球','赌马',
+  '葯','迷药','迷药','春药',
+  '果聊','楼凤','品茶','喝茶','茶资源',
+  '兼职上门','上门按摩','私密spa',
+]
+
+const REPORT_REASONS = [
+  '垃圾广告',
+  '色情低俗',
+  '暴力违法',
+  '人身攻击',
+  '其他',
+]
 
 const comments = ref([])
 const loading = ref(true)
@@ -22,6 +50,13 @@ const dragOver = ref(false)
 const lightboxSrc = ref('')
 const lightboxType = ref('')
 const showLightbox = ref(false)
+const deletingId = ref('')
+const reportTargetId = ref('')
+const reportReason = ref('')
+const reportCustomReason = ref('')
+const reporting = ref(false)
+const reportError = ref('')
+const reportSuccess = ref(false)
 
 function openLightbox(src, type) {
   lightboxSrc.value = src
@@ -155,6 +190,7 @@ function renderContent(text) {
 
 onMounted(async () => {
   initLeanCloud()
+  checkAdmin()
   await loadComments()
 })
 
@@ -183,6 +219,13 @@ async function submitComment() {
   if (!author.value.trim() || !content.value.trim()) {
     submitError.value = '请填写昵称和评论内容'
     return
+  }
+  const text = content.value.trim().toLowerCase()
+  for (const word of BLOCKED_WORDS) {
+    if (text.includes(word.toLowerCase())) {
+      submitError.value = `评论内容包含违规词语，请修改后提交`
+      return
+    }
   }
   submitting.value = true
   submitError.value = ''
@@ -223,6 +266,82 @@ function formatDate(date) {
   if (diff < 604800000) return `${Math.floor(diff / 86400000)} 天前`
   return d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' })
 }
+
+async function deleteComment(id) {
+  if (!confirm('确定要删除这条评论吗？')) return
+  deletingId.value = id
+  try {
+    const obj = AV.Object.createWithoutData('Comment', id)
+    await obj.destroy()
+    comments.value = comments.value.filter(c => c.id !== id)
+  } catch (e) {
+    console.error('Failed to delete comment:', e)
+    alert('删除失败：' + (e.message || '未知错误'))
+  }
+  deletingId.value = ''
+}
+
+function openReportDialog(id) {
+  reportTargetId.value = id
+  reportReason.value = ''
+  reportCustomReason.value = ''
+  reportError.value = ''
+  reportSuccess.value = false
+}
+
+function closeReportDialog() {
+  reportTargetId.value = ''
+}
+
+async function submitReport() {
+  if (!reportReason.value) {
+    reportError.value = '请选择举报理由'
+    return
+  }
+  const reason = reportReason.value === '其他'
+    ? (reportCustomReason.value.trim() || '其他')
+    : reportReason.value
+  if (reportReason.value === '其他' && !reportCustomReason.value.trim()) {
+    reportError.value = '请填写具体理由'
+    return
+  }
+  reporting.value = true
+  reportError.value = ''
+  try {
+    const Report = AV.Object.extend('Report')
+    const c = comments.value.find(c => c.id === reportTargetId.value)
+    const report = new Report()
+    report.set('commentId', reportTargetId.value)
+    report.set('postId', props.postId)
+    report.set('reason', reason)
+    report.set('resolved', false)
+    const acl = new AV.ACL()
+    acl.setPublicReadAccess(true)
+    acl.setPublicWriteAccess(true)
+    report.setACL(acl)
+    await report.save()
+    // Notify admin via email (Cloudflare Pages Function)
+    try {
+      await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commentId: reportTargetId.value,
+          postId: props.postId,
+          reason,
+          commentAuthor: c?.author || '',
+          commentText: c?.content || '',
+        })
+      })
+    } catch (e) { /* email endpoint may not be available in dev */ }
+    reportSuccess.value = true
+    setTimeout(() => { closeReportDialog() }, 2000)
+  } catch (e) {
+    console.error('Failed to submit report:', e)
+    reportError.value = '举报提交失败，请重试'
+  }
+  reporting.value = false
+}
 </script>
 
 <template>
@@ -241,6 +360,22 @@ function formatDate(date) {
         <div class="comment-header">
           <strong class="comment-author">{{ c.author }}</strong>
           <span class="comment-time">{{ formatDate(c.createdAt) }}</span>
+          <span class="comment-actions">
+            <button
+              v-if="isAdmin"
+              class="comment-action-btn comment-del-btn"
+              :disabled="deletingId === c.id"
+              @click="deleteComment(c.id)"
+              title="删除评论"
+            >
+              {{ deletingId === c.id ? '删除中...' : '删除' }}
+            </button>
+            <button
+              class="comment-action-btn comment-report-btn"
+              @click="openReportDialog(c.id)"
+              title="举报评论"
+            >举报</button>
+          </span>
         </div>
         <div class="comment-content" v-html="renderContent(c.content)" @click="onCommentClick"></div>
       </div>
@@ -299,6 +434,46 @@ function formatDate(date) {
       <div v-if="showLightbox" class="lightbox-overlay" @click="closeLightbox">
         <img v-if="lightboxType === 'image'" :src="lightboxSrc" class="lightbox-img" @click.stop />
         <video v-else-if="lightboxType === 'video'" :src="lightboxSrc" controls class="lightbox-video" @click.stop></video>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="reportTargetId" class="report-overlay" @click.self="closeReportDialog">
+        <div class="report-dialog">
+          <h3>举报评论</h3>
+          <div class="report-form">
+            <label>请选择举报理由：</label>
+            <div class="report-reasons">
+              <label
+                v-for="r in REPORT_REASONS"
+                :key="r"
+                class="report-reason-item"
+                :class="{ selected: reportReason === r }"
+              >
+                <input type="radio" v-model="reportReason" :value="r" />
+                {{ r }}
+              </label>
+            </div>
+            <div v-if="reportReason === '其他'" class="report-custom">
+              <textarea
+                v-model="reportCustomReason"
+                placeholder="请描述具体理由..."
+                rows="2"
+                class="report-textarea"
+              ></textarea>
+            </div>
+            <div v-if="reportError" class="report-error-msg">{{ reportError }}</div>
+            <div v-if="reportSuccess" class="report-success-msg">举报已提交，感谢你的反馈！</div>
+            <div class="report-actions">
+              <button class="report-cancel-btn" @click="closeReportDialog">取消</button>
+              <button
+                class="report-submit-btn"
+                :disabled="reporting || reportSuccess"
+                @click="submitReport"
+              >{{ reporting ? '提交中...' : '提交举报' }}</button>
+            </div>
+          </div>
+        </div>
       </div>
     </Teleport>
   </div>
@@ -498,5 +673,143 @@ function formatDate(date) {
   color: var(--vp-c-danger-1);
   font-size: 0.85rem;
   margin-bottom: 8px;
+}
+.comment-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.comment-action-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 4px;
+  background: transparent;
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.comment-action-btn:hover:not(:disabled) {
+  border-color: currentColor;
+}
+.comment-del-btn {
+  color: var(--vp-c-danger-1);
+}
+.comment-report-btn {
+  color: var(--vp-c-text-3);
+}
+.comment-report-btn:hover {
+  color: var(--vp-c-warning-1);
+  border-color: var(--vp-c-warning-1);
+}
+.report-overlay {
+  position: fixed; inset: 0; z-index: 10001;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+}
+.report-dialog {
+  background: var(--vp-c-bg);
+  border-radius: 12px;
+  padding: 28px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+}
+.report-dialog h3 {
+  margin: 0 0 16px;
+  font-size: 1.1rem;
+}
+.report-form label {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  color: var(--vp-c-text-2);
+}
+.report-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.report-reason-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  padding: 4px 10px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.report-reason-item.selected {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+}
+.report-reason-item input {
+  accent-color: var(--vp-c-brand-1);
+}
+.report-custom {
+  margin-bottom: 12px;
+}
+.report-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-size: 0.85rem;
+  font-family: inherit;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.report-textarea:focus {
+  outline: none;
+  border-color: var(--vp-c-brand-1);
+}
+.report-error-msg {
+  color: var(--vp-c-danger-1);
+  font-size: 0.85rem;
+  margin-bottom: 8px;
+}
+.report-success-msg {
+  color: var(--vp-c-brand-1);
+  font-size: 0.85rem;
+  margin-bottom: 8px;
+}
+.report-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.report-cancel-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.report-submit-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--vp-c-brand-1);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.report-submit-btn:hover:not(:disabled) {
+  background: var(--vp-c-brand-2);
+}
+.report-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
