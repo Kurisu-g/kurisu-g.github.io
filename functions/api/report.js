@@ -13,37 +13,31 @@ export async function onRequestPost(context) {
 
     const adminEmail = env.ADMIN_EMAIL || '1261843659@qq.com'
 
-    // Use MailChannels (free for Cloudflare, no API key needed)
-    const mcReq = {
-      personalizations: [{ to: [{ email: adminEmail }] }],
-      from: { email: 'noreply@kurisu-blog.pages.dev', name: '博客举报通知' },
-      subject: `[博客举报] ${reason}`,
-      content: [{
-        type: 'text/plain',
-        value: [
-          `新举报通知`,
-          ``,
-          `评论者: ${commentAuthor}`,
-          `评论内容: ${commentText}`,
-          `举报理由: ${reason}`,
-          `评论ID: ${commentId}`,
-          `文章ID: ${postId}`,
-          ``,
-          `处理: https://kurisu-blog.pages.dev/admin`,
-        ].join('\n')
-      }]
+    // Try Brevo first (free, no domain setup needed)
+    if (env.BREVO_API_KEY) {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': env.BREVO_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { email: 'noreply@kurisu-blog.pages.dev', name: '博客举报' },
+          to: [{ email: adminEmail }],
+          subject: `[博客举报] ${reason}`,
+          textContent: [
+            `评论者: ${commentAuthor}`,
+            `评论内容: ${commentText}`,
+            `举报理由: ${reason}`,
+            '',
+            `处理: https://kurisu-blog.pages.dev/admin`
+          ].join('\n')
+        })
+      })
+      console.log('Brevo status:', res.status, await res.text().catch(() => ''))
     }
 
-    const resp = await fetch('https://api.mailchannels.net/tx/v1/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mcReq)
-    })
-
-    const mcResult = await resp.text()
-    const emailSent = resp.ok
-
-    return new Response(JSON.stringify({ success: true, emailSent, mcStatus: resp.status, mcResult }), {
+    return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     })
