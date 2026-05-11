@@ -12,29 +12,32 @@ export async function onRequestPost(context) {
     }
 
     const adminEmail = env.ADMIN_EMAIL || '1261843659@qq.com'
+    const apiUser = env.SC_API_USER
+    const apiKey = env.SC_API_KEY
 
-    // Try Brevo first (free, no domain setup needed)
-    if (env.BREVO_API_KEY) {
-      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'api-key': env.BREVO_API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          sender: { email: 'noreply@kurisu-blog.pages.dev', name: '博客举报' },
-          to: [{ email: adminEmail }],
-          subject: `[博客举报] ${reason}`,
-          textContent: [
-            `评论者: ${commentAuthor}`,
-            `评论内容: ${commentText}`,
-            `举报理由: ${reason}`,
-            '',
-            `处理: https://kurisu-blog.pages.dev/admin`
-          ].join('\n')
-        })
+    if (apiUser && apiKey) {
+      const text = [
+        `评论者: ${commentAuthor}`,
+        `评论内容: ${commentText}`,
+        `举报理由: ${reason}`,
+        `处理: https://kurisu-blog.pages.dev/admin`,
+      ].join('\n')
+
+      const form = new URLSearchParams({
+        apiUser,
+        apiKey,
+        from: 'blog@kurisu-blog.pages.dev',
+        fromName: '博客举报通知',
+        to: adminEmail,
+        subject: `[博客举报] ${reason}`,
+        plain: text,
       })
-      console.log('Brevo status:', res.status, await res.text().catch(() => ''))
+
+      await fetch('https://api.sendcloud.net/apiv2/mail/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      })
     }
 
     return new Response(JSON.stringify({ success: true }), {
