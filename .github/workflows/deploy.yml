@@ -16,9 +16,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: cp -r functions .vitepress/dist/
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy .vitepress/dist --project-name=kurisu-blog --branch=main --functions=./functions
+          command: pages deploy .vitepress/dist --project-name=kurisu-blog --branch=main
