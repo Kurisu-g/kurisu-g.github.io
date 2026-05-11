@@ -10,27 +10,17 @@ export async function onRequestPost(context) {
       })
     }
 
-    const text = [
+    const desp = [
       `评论者: ${commentAuthor}`,
       `评论内容: ${commentText}`,
       `举报理由: ${reason}`,
       `处理: https://kurisu-blog.pages.dev/admin`,
-    ].join('\n')
+    ].join('\n\n')
 
-    const form = new URLSearchParams({
-      apiUser: 'sc_gfqvlc_test_IGWHva',
-      apiKey: '12a1eb6cff112641a2acf7d46aa1333c',
-      from: 'blog@sendcloud.org',
-      fromName: '博客举报通知',
-      to: '1261843659@qq.com',
-      subject: `[博客举报] ${reason}`,
-      plain: text,
-    })
-
-    const res = await fetch('https://api.sendcloud.net/apiv2/mail/send', {
+    const res = await fetch(`https://sctapi.ftqq.com/SCT348321TcWBDwFXQEZ1RpDvQFpZQZIYX.send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form.toString(),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: `[博客举报] ${reason}`, desp }),
     })
     const scResult = await res.text()
 
