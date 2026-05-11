@@ -26,8 +26,8 @@ let posts = ref([])
 let loading = ref(true)
 let showDeleteConfirm = ref('')
 
-// Comments
-let allComments = ref([])
+// Comments — grouped by post
+let commentGroups = ref([])
 let commentsLoading = ref(false)
 
 // Reports
@@ -166,15 +166,35 @@ async function loadComments() {
   try {
     const query = new AV.Query('Comment')
     query.descending('createdAt')
-    query.limit(200)
+    query.limit(500)
     const results = await query.find()
-    allComments.value = results.map(obj => ({
+    const comments = results.map(obj => ({
       id: obj.id,
       author: obj.get('author'),
       content: obj.get('content'),
       postId: obj.get('postId'),
       createdAt: obj.createdAt,
     }))
+    // Group by postId
+    const map = new Map()
+    for (const c of comments) {
+      if (!map.has(c.postId)) map.set(c.postId, [])
+      map.get(c.postId).push(c)
+    }
+    // Fetch post titles
+    const groups = []
+    for (const [postId, coms] of map) {
+      let postTitle = '未知文章'
+      try {
+        const p = AV.Object.createWithoutData('Post', postId)
+        const fetched = await p.fetch()
+        postTitle = fetched.get('title') || '未知文章'
+      } catch (e) { /* post deleted */ }
+      groups.push({ postId, postTitle, comments: coms })
+    }
+    // Sort: most recent comment first per group
+    groups.sort((a, b) => new Date(b.comments[0].createdAt) - new Date(a.comments[0].createdAt))
+    commentGroups.value = groups
   } catch (e) {
     console.error('Failed to load comments:', e)
   }
@@ -186,7 +206,17 @@ async function deleteComment(id) {
   try {
     const obj = AV.Object.createWithoutData('Comment', id)
     await obj.destroy()
-    allComments.value = allComments.value.filter(c => c.id !== id)
+    // Remove from groups
+    for (const g of commentGroups.value) {
+      const idx = g.comments.findIndex(c => c.id === id)
+      if (idx !== -1) {
+        g.comments.splice(idx, 1)
+        if (g.comments.length === 0) {
+          commentGroups.value = commentGroups.value.filter(x => x.postId !== g.postId)
+        }
+        break
+      }
+    }
     message.value = '评论已删除'
   } catch (e) {
     console.error('Failed to delete comment:', e)
@@ -395,23 +425,30 @@ onMounted(() => {
 
       <!-- Comments tab -->
       <div v-if="activeTab === 'comments'">
-        <h3>评论管理（{{ allComments.length }}）</h3>
         <div v-if="commentsLoading" class="loading-text">加载中...</div>
-        <table v-else-if="allComments.length > 0" class="post-table">
-          <thead>
-            <tr><th>昵称</th><th>内容</th><th>日期</th><th>操作</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="c in allComments" :key="c.id">
-              <td class="td-author">{{ c.author }}</td>
-              <td class="td-content">{{ c.content.length > 80 ? c.content.slice(0, 80) + '...' : c.content }}</td>
-              <td class="td-date">{{ new Date(c.createdAt).toLocaleString('zh-CN') }}</td>
-              <td class="td-actions">
-                <button class="del-btn" @click="deleteComment(c.id)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else-if="commentGroups.length > 0">
+          <div v-for="group in commentGroups" :key="group.postId" class="comment-group-card">
+            <div class="comment-group-header">
+              <h4>{{ group.postTitle }}</h4>
+              <span class="comment-group-count">{{ group.comments.length }} 条评论</span>
+            </div>
+            <table class="post-table">
+              <thead>
+                <tr><th>昵称</th><th>内容</th><th>日期</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="c in group.comments" :key="c.id">
+                  <td class="td-author">{{ c.author }}</td>
+                  <td class="td-content">{{ c.content.length > 80 ? c.content.slice(0, 80) + '...' : c.content }}</td>
+                  <td class="td-date">{{ new Date(c.createdAt).toLocaleString('zh-CN') }}</td>
+                  <td class="td-actions">
+                    <button class="del-btn" @click="deleteComment(c.id)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
         <p v-else class="no-posts">暂无评论</p>
       </div>
 
@@ -493,4 +530,10 @@ hr { margin: 28px 0; border: none; border-top: 1px solid var(--vp-c-divider); }
 .resolved-badge { color: var(--vp-c-brand-1); font-size: 0.8rem; }
 .pending-badge { color: var(--vp-c-danger-1); font-size: 0.8rem; font-weight: 500; }
 .resolved-row { opacity: 0.6; }
+.comment-group-card { margin-bottom: 28px; border: 1px solid var(--vp-c-divider); border-radius: 10px; overflow: hidden; }
+.comment-group-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--vp-c-bg-soft); border-bottom: 1px solid var(--vp-c-divider); }
+.comment-group-header h4 { margin: 0; font-size: 0.95rem; }
+.comment-group-count { font-size: 0.8rem; color: var(--vp-c-text-3); }
+.comment-group-card .post-table { margin: 0; }
+.comment-group-card .post-table th { border-top: none; }
 </style>
