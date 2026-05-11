@@ -9,37 +9,39 @@ const props = defineProps({
 const views = ref(0)
 const loaded = ref(false)
 
+function getVisitorId() {
+  let vid = localStorage.getItem('blog_visitor_id')
+  if (!vid) {
+    vid = crypto.randomUUID()
+    localStorage.setItem('blog_visitor_id', vid)
+  }
+  return vid
+}
+
 onMounted(async () => {
   initLeanCloud()
-  const storageKey = 'blog_viewed_' + props.postId
+  const vid = getVisitorId()
   try {
+    // Record unique view per visitor per post
     const query = new AV.Query('PageView')
     query.equalTo('postId', props.postId)
-    let obj = await query.first()
-    if (obj) {
-      if (!localStorage.getItem(storageKey)) {
-        obj.increment('count', 1)
-        const acl = new AV.ACL()
-        acl.setPublicReadAccess(true)
-        acl.setPublicWriteAccess(true)
-        obj.setACL(acl)
-        await obj.save(null, { fetchWhenSave: true })
-        localStorage.setItem(storageKey, '1')
-      }
-      views.value = obj.get('count')
-    } else {
+    query.equalTo('visitorId', vid)
+    const existing = await query.first()
+    if (!existing) {
       const PageView = AV.Object.extend('PageView')
-      obj = new PageView()
-      obj.set('postId', props.postId)
-      obj.set('count', 1)
+      const pv = new PageView()
+      pv.set('postId', props.postId)
+      pv.set('visitorId', vid)
       const acl = new AV.ACL()
       acl.setPublicReadAccess(true)
       acl.setPublicWriteAccess(true)
-      obj.setACL(acl)
-      await obj.save()
-      localStorage.setItem(storageKey, '1')
-      views.value = 1
+      pv.setACL(acl)
+      await pv.save()
     }
+    // Count total unique views
+    const countQuery = new AV.Query('PageView')
+    countQuery.equalTo('postId', props.postId)
+    views.value = await countQuery.count()
   } catch (e) {
     console.error('View counter error:', e)
   }
@@ -65,7 +67,5 @@ onMounted(async () => {
   color: var(--vp-c-text-3);
   font-size: 0.875rem;
 }
-.view-icon {
-  flex-shrink: 0;
-}
+.view-icon { flex-shrink: 0; }
 </style>

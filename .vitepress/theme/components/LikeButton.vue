@@ -53,14 +53,30 @@ async function toggleLike() {
 }
 
 async function addLike() {
+  // Ensure a view record exists for this visitor
+  const vQuery = new AV.Query('PageView')
+  vQuery.equalTo('postId', props.postId)
+  vQuery.equalTo('visitorId', visitorId.value)
+  const existingView = await vQuery.first()
+  if (!existingView) {
+    const PageView = AV.Object.extend('PageView')
+    const pv = new PageView()
+    pv.set('postId', props.postId)
+    pv.set('visitorId', visitorId.value)
+    const acl = new AV.ACL()
+    acl.setPublicReadAccess(true)
+    acl.setPublicWriteAccess(true)
+    pv.setACL(acl)
+    await pv.save()
+  }
   const Like = AV.Object.extend('Like')
   const like = new Like()
   like.set('postId', props.postId)
   like.set('visitorId', visitorId.value)
-  const acl = new AV.ACL()
-  acl.setPublicReadAccess(true)
-  acl.setPublicWriteAccess(true)
-  like.setACL(acl)
+  const acl2 = new AV.ACL()
+  acl2.setPublicReadAccess(true)
+  acl2.setPublicWriteAccess(true)
+  like.setACL(acl2)
   await like.save()
   liked.value = true
   likes.value++
