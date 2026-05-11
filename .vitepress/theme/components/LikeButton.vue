@@ -53,6 +53,12 @@ async function toggleLike() {
 }
 
 async function addLike() {
+  // Prevent duplicate: check again right before save
+  const existQuery = new AV.Query('Like')
+  existQuery.equalTo('postId', props.postId)
+  existQuery.equalTo('visitorId', visitorId.value)
+  const dup = await existQuery.first()
+  if (dup) { liked.value = true; return }
   // Ensure a view record exists for this visitor
   const vQuery = new AV.Query('PageView')
   vQuery.equalTo('postId', props.postId)
