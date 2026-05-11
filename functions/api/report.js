@@ -40,10 +40,10 @@ export async function onRequestPost(context) {
       body: JSON.stringify(mcReq)
     })
 
-    const result = await resp.text()
+    const mcResult = await resp.text()
     const emailSent = resp.ok
 
-    return new Response(JSON.stringify({ success: true, emailSent }), {
+    return new Response(JSON.stringify({ success: true, emailSent, mcStatus: resp.status, mcResult }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     })
