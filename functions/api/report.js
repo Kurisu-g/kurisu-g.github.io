@@ -6,8 +6,7 @@ export async function onRequestPost(context) {
 
     if (!commentId || !reason) {
       return new Response(JSON.stringify({ error: 'Missing fields' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
+        status: 400, headers: { 'Content-Type': 'application/json' }
       })
     }
 
@@ -28,20 +27,19 @@ export async function onRequestPost(context) {
       plain: text,
     })
 
-    await fetch('https://api.sendcloud.net/apiv2/mail/send', {
+    const res = await fetch('https://api.sendcloud.net/apiv2/mail/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(),
     })
+    const scResult = await res.text()
 
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
+    return new Response(JSON.stringify({ success: true, scStatus: res.status, scResult }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
     })
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      status: 500, headers: { 'Content-Type': 'application/json' }
     })
   }
 }
