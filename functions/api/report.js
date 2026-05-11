@@ -1,5 +1,5 @@
 export async function onRequestPost(context) {
-  const { request, env } = context
+  const { request } = context
   try {
     const body = await request.json()
     const { commentId, postId, reason, commentAuthor, commentText } = body
@@ -11,34 +11,28 @@ export async function onRequestPost(context) {
       })
     }
 
-    const adminEmail = env.ADMIN_EMAIL || '1261843659@qq.com'
-    const apiUser = env.SC_API_USER
-    const apiKey = env.SC_API_KEY
+    const text = [
+      `评论者: ${commentAuthor}`,
+      `评论内容: ${commentText}`,
+      `举报理由: ${reason}`,
+      `处理: https://kurisu-blog.pages.dev/admin`,
+    ].join('\n')
 
-    if (apiUser && apiKey) {
-      const text = [
-        `评论者: ${commentAuthor}`,
-        `评论内容: ${commentText}`,
-        `举报理由: ${reason}`,
-        `处理: https://kurisu-blog.pages.dev/admin`,
-      ].join('\n')
+    const form = new URLSearchParams({
+      apiUser: 'sc_gfqvlc_test_IGWHva',
+      apiKey: '12a1eb6cff112641a2acf7d46aa1333c',
+      from: 'blog@sendcloud.org',
+      fromName: '博客举报通知',
+      to: '1261843659@qq.com',
+      subject: `[博客举报] ${reason}`,
+      plain: text,
+    })
 
-      const form = new URLSearchParams({
-        apiUser,
-        apiKey,
-        from: 'blog@kurisu-blog.pages.dev',
-        fromName: '博客举报通知',
-        to: adminEmail,
-        subject: `[博客举报] ${reason}`,
-        plain: text,
-      })
-
-      await fetch('https://api.sendcloud.net/apiv2/mail/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: form.toString(),
-      })
-    }
+    await fetch('https://api.sendcloud.net/apiv2/mail/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    })
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
